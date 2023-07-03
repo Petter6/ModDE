@@ -15,13 +15,16 @@ from .sampling import (
     gaussian_sampling,
     sobol_sampling,
     halton_sampling,
+    hammersley_sampling,
     uniform_sampling,
+    latin_sampling,
+    grid_sampling,
     mirrored_sampling
 )
 
 class TrackedStats(AnnotatedStruct):
     """Object for keeping track of parameters we might want to track during the optimization process
-    
+
     Attributes
     ----------
     curr_idx: int = 0
@@ -47,20 +50,20 @@ class TrackedStats(AnnotatedStruct):
     curr_F: float = 0.0
     curr_CR: float = 0.0
     F_Memory_mean: float = 0.0
-    
+
     def __init__(self, *args, **kwargs) -> None:
         """Intialize parameters."""
         super().__init__(*args, **kwargs)
-    
+
 
 class Parameters(AnnotatedStruct):
     """AnnotatedStruct object for holding the parameters for the ModularDE.
 
     Attributes
     ----------
-    d: int 
+    d: int
         Dimensionality of the search-space
-    budget: int = None 
+    budget: int = None
         Total budget of the optimzation procedure
     lambda_: int = None
         Population size at the current moment. When `lspr` is active, this corresponds to the initial population size and is adapted during the search
@@ -69,24 +72,24 @@ class Parameters(AnnotatedStruct):
     CR: np.ndarray = None
         The crossover rates to use. Should be the same size as the population size (lambda_)
     bound_correction: str (
-        None, "saturate", "unif_resample", "COTN", "toroidal", "mirror", 
+        None, "saturate", "unif_resample", "COTN", "toroidal", "mirror",
         "hvb", "expc_target", "expc_center", "exps") = None
         How to deal with the box-constraints
     base_sampler: str (
         'gaussian', 'sobol', 'halton', 'uniform') = 'gaussian'
-        Sampling method used for initialization. 
+        Sampling method used for initialization.
     mutation_base: str ('rand', 'best', 'target') = 'rand'
-        Which vector to use as the base element for the mutation. Best is best individual in the population, target 
+        Which vector to use as the base element for the mutation. Best is best individual in the population, target
         is also often refered to as current (so each element is used exaclty once as the base for mutation)
     mutation_reference: str (None, 'pbest', 'best', 'rand') = None
         This corresponds to the classical -to-X DE variants. The current X is subtracted from the selected reference as an initial
         difference. Note that this is not counted as a difference component in the mutation_n_comps parameter.
     mutation_n_comps: int (1, 2) = 1
-        The number of difference components to use. 
+        The number of difference components to use.
     mutation_use_weighted_F: bool = False
         Decreases the effecive F values at the start of the search, increases them afterwards. Doesn't impact the F value adaptation
     crossover: (
-        'bin', 'exp') = 'bin'   
+        'bin', 'exp') = 'bin'
         Crossover operator to use
     eigenvalue_crossover: bool = False
         When enabled, crossover occurs based on the eigenvectors of the individuals rather than their current representation
@@ -120,10 +123,10 @@ class Parameters(AnnotatedStruct):
     F: np.ndarray = None
     CR: np.ndarray = None
     bound_correction: (
-        None, "saturate", "unif_resample", "COTN", "toroidal", "mirror", 
+        None, "saturate", "unif_resample", "COTN", "toroidal", "mirror",
         "hvb", "expc_target", "expc_center", "exps") = "saturate"
     base_sampler: (
-        'gaussian', 'sobol', 'halton', 'uniform') = 'uniform'
+        'gaussian', 'sobol', 'halton', 'hammersley', 'uniform', 'latin', 'grid') = 'uniform'
     mutation_base: (
         'rand', 'best', 'target') = 'rand'
     mutation_reference: (
@@ -133,12 +136,12 @@ class Parameters(AnnotatedStruct):
     # mutation: (
         # 'rand/1', 'rand/2', 'best/1', 'target_pbest/1', 'target_best/2', 'target_rand/1', '2_opt/1', 'curr_to_best/1') = 'rand/1'
     crossover: (
-        'bin', 'exp') = 'bin'  
+        'bin', 'exp') = 'bin'
     eigenvalue_crossover: bool = False
     adaptation_method_F: (
-        None, 'shade', 'shade_modified', 'jDE') = None   
+        None, 'shade', 'shade_modified', 'jDE') = None
     adaptation_method_CR: (
-        None, 'shade', 'jDE') = None      
+        None, 'shade', 'jDE') = None
     use_jso_caps: bool = False
     lpsr: bool = False
     use_archive: bool = False
@@ -163,11 +166,11 @@ class Parameters(AnnotatedStruct):
         "adaptation_method_CR", #3
         "use_jso_caps",
         "oppositional_initialization",
-        "lpsr", #2 
+        "lpsr", #2
     )
     lb: np.ndarray = None
     ub: np.ndarray = None
-    
+
     init_stats: bool = False
 
     def __init__(self, *args, **kwargs) -> None:
@@ -194,8 +197,11 @@ class Parameters(AnnotatedStruct):
             "gaussian": gaussian_sampling,
             "sobol": sobol_sampling,
             "halton": halton_sampling,
+            "hammersley": hammersley_sampling,
             "uniform": uniform_sampling,
-        }.get(self.base_sampler, gaussian_sampling)(self.d)
+            "latin": latin_sampling,
+            "grid": grid_sampling
+        }.get(self.base_sampler, gaussian_sampling)(self.d, self.lambda_)
         
         if self.oppositional_initialization:
             sampler = mirrored_sampling(sampler)

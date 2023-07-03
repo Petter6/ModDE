@@ -6,9 +6,13 @@ from collections.abc import Iterator
 import numpy as np
 from scipy import stats
 from numba import vectorize, float64, int64
+import math
+import itertools
+import random
 
 
-def gaussian_sampling(d: int) -> Generator[np.ndarray, None, None]:
+# Bell Curve
+def gaussian_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
     """Generator yielding random normal (gaussian) samples.
 
     Parameters
@@ -21,11 +25,12 @@ def gaussian_sampling(d: int) -> Generator[np.ndarray, None, None]:
     numpy.ndarray
 
     """
+
     while True:
-        yield np.random.normal(0.5, 0.5/3, size=(d, 1))
+        yield np.random.normal(0.5, 0.5 / 3, size=(d, 1))
 
 
-def sobol_sampling(d: int) -> Generator[np.ndarray, None, None]:
+def sobol_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
     """Generator yielding samples from a Sobol sequence.
 
     Parameters
@@ -38,12 +43,13 @@ def sobol_sampling(d: int) -> Generator[np.ndarray, None, None]:
     numpy.ndarray
 
     """
+
     sobol = Sobol(d, np.random.randint(2, max(3, d ** 2)))
     while True:
         yield next(sobol).reshape(-1, 1)
 
 
-def halton_sampling(d: int) -> Generator[np.ndarray, None, None]:
+def halton_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
     """Generator yielding samples from a Halton sequence.
 
     Parameters
@@ -56,11 +62,33 @@ def halton_sampling(d: int) -> Generator[np.ndarray, None, None]:
     numpy.ndarray
 
     """
+
     halton = Halton(d)
     while True:
         yield next(halton).reshape(-1, 1)
 
-def uniform_sampling(d: int) -> Generator[np.ndarray, None, None]:
+
+def hammersley_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
+    """Generator yielding samples from Hammersley sequence.
+
+           Parameters
+           ----------
+           d: int
+                An integer denoting the dimenionality of the samples
+           n: int
+                An integer denoting the population size
+
+           Yields
+           ------
+           numpy.ndarray
+
+           """
+    hammersley = Hammersley(d, n)
+    while True:
+        yield next(hammersley).reshape(-1, 1)
+
+
+def uniform_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
     """Generator yielding random uniform samples.
 
     Parameters
@@ -73,10 +101,51 @@ def uniform_sampling(d: int) -> Generator[np.ndarray, None, None]:
     numpy.ndarray
 
     """
+
     while True:
         yield np.random.uniform(size=(d, 1))
 
-        
+
+def latin_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
+    """Generator yielding samples from the Latin Hypercube Sampling method.
+
+       Parameters
+       ----------
+       d: int
+            An integer denoting the dimenionality of the samples
+       n: int
+            An integer denoting the population size
+
+       Yields
+       ------
+       numpy.ndarray
+
+       """
+    latin = Latin(d, n)
+    while True:
+        yield next(latin).reshape(-1, 1)
+
+
+def grid_sampling(d: int, n: int) -> Generator[np.ndarray, None, None]:
+    """Generator yielding samples from a grid.
+
+          Parameters
+          ----------
+          d: int
+               An integer denoting the dimenionality of the samples
+          n: int
+               An integer denoting the population size
+
+          Yields
+          ------
+          numpy.ndarray
+
+          """
+    grid = Grid(d, n)
+    while True:
+        yield next(grid).reshape(-1, 1)
+
+
 def mirrored_sampling(sampler: Generator) -> Generator[np.ndarray, None, None]:
     """Generator yielding mirrored samples.
 
@@ -95,7 +164,7 @@ def mirrored_sampling(sampler: Generator) -> Generator[np.ndarray, None, None]:
     """
     for sample in sampler:
         yield sample
-        yield 1-sample
+        yield 1 - sample
 
 
 class Halton(Iterator):
@@ -121,6 +190,7 @@ class Halton(Iterator):
     @staticmethod
     def get_primes(n: int) -> np.ndarray:
         """Return n primes, starting from 0."""
+
         def inner(n_):
             sieve = np.ones(n_ // 3 + (n_ % 6 == 2), dtype=bool)
             for i in range(1, int(n_ ** 0.5) // 3 + 1):
@@ -264,3 +334,170 @@ class Sobol(Iterator):
         if x != -1:
             return x + 1
         return len(format(n, "b")) + 1
+
+
+class Hammersley(Iterator):
+    """Iterator implementing Hammersley Quasi random sequences.
+
+    Closely resembles the Halton sequence, except for the first dimension in which sampling
+    points are equidistant.
+
+    Attributes
+    ----------
+    d: int
+        dimension
+    bases: np.ndarray
+        array of primes
+    index: itertools.count
+        current index
+    lambda:
+        the population size
+
+
+    """
+
+    def __init__(self, d, lambda_, start=1):
+        """Compute the bases, and set index to start."""
+        self.d = d
+        self.lambda_ = lambda_
+        self.bases = self.get_primes(self.d)
+        self.index = itertools.count(start)
+
+    @staticmethod
+    def get_primes(n: int) -> np.ndarray:
+        """Return n primes, starting from 0."""
+
+        def inner(n_):
+            sieve = np.ones(n_ // 3 + (n_ % 6 == 2), dtype=bool)
+            for i in range(1, int(n_ ** 0.5) // 3 + 1):
+                if sieve[i]:
+                    k = 3 * i + 1 | 1
+                    sieve[k * k // 3:: 2 * k] = False
+                    sieve[k * (k - 2 * (i & 1) + 4) // 3:: 2 * k] = False
+            return np.r_[2, 3, ((3 * np.nonzero(sieve)[0][1:] + 1) | 1)]
+
+        primes = inner(max(6, n))
+        while len(primes) < n:
+            primes = inner(len(primes) ** 2)
+        return np.append([1], primes[:n - 1])
+
+    def __next__(self) -> np.ndarray:
+        """Return next Hammersley sequence."""
+        return self.vectorized_next(next(self.index), self.bases, self.lambda_)
+
+    @staticmethod
+    @vectorize([float64(int64, int64, int64)])
+    def vectorized_next(index: int, base: int, n: int) -> float:
+        """Vectorized method for computing Hammersley sequence."""
+        d, x = 1, 0
+
+        # Points are equidistant in the first dimension
+        if base == 1:
+            return float(index - 1) / float(n - 1)
+
+        # Higher dimensions follow Halton Sequence
+        while index > 0:
+            index, remainder = divmod(index, base)
+            d *= base
+            x += remainder / d
+        return x
+
+
+class Latin(Iterator):
+    """Iterator implementing Latin HQ sequence
+
+    Every dimension is divided into a number of stratas equal to population size. For
+    every strata one sampling point is chosen.
+
+    Attributes
+    ----------
+    d: int
+        dimensionality
+    count: itertools.count
+        current index
+    array: np.ndarray
+        contains sampling points, size = lambda
+    lambda: int
+        population size
+
+    """
+
+    def __init__(self, d, lambda_, start=0):
+        self.d = d
+        self.lambda_ = lambda_
+        self.array = self.getarray(self.d, self.lambda_)
+        self.count = itertools.count(start)
+
+    @staticmethod
+    def getarray(d: int, n: int) -> np.ndarray:
+        lower_limits = np.arange(0, n) / n
+        upper_limits = np.arange(1, n + 1) / n
+
+        # Add random numbers between the lower and upper limits to the array
+        arr = np.random.uniform(low=lower_limits, high=upper_limits, size=(d, n)).T
+
+        # Create different combinations
+        for i in range(arr.shape[1]):
+            np.random.shuffle(arr[:, i])
+
+        return arr
+
+    def __next__(self) -> np.ndarray:
+        """Return next Latin HQ sequence."""
+        return self.array[next(self.count)]
+
+
+class Grid(Iterator):
+    """Iterator implementing Grid sequence
+
+    Forms a grid x^d, where the grid size is chosen such that it is the closest to population size, without
+    the population size exceeding it.
+
+    Attributes
+    ----------
+    d: int
+        dimension
+    array: np.ndarray
+        array of sampling points
+    count: itertools.count
+        current index
+    order: np.ndarray
+        array size lambda containing indices corresponding to the array of sampling points
+    lambda: int
+        population size
+    """
+
+    def __init__(self, d, lambda_, start=0):
+        self.d = d
+        self.lambda_ = lambda_
+        self.array = self.getarray(self.d, self.lambda_)
+        self.order = self.create_sequence(self.d, self.lambda_)
+        self.count = itertools.count(start)
+
+    @staticmethod
+    def getarray(d: int, n: int) -> np.ndarray:
+        # create a mesh grid that contains the grid
+        x = np.linspace(0., 1., math.ceil(n ** (1 / d)))
+        mesh = np.meshgrid(*[x] * d)
+        positions = np.vstack(map(np.ravel, mesh))
+
+        return positions
+
+    @staticmethod
+    def create_sequence(d: int, n: int) -> np.ndarray:
+        # compute the highest possible index
+        n_points = math.ceil(n ** (1 / d)) ** d
+
+        # draw n numbers from all possible indices
+        return random.sample(range(n_points), n)
+
+    def __next__(self) -> np.ndarray:
+        # get index for the next sampling point
+        new_point = self.order[next(self.count)]
+        x = []
+
+        # compute sampling point
+        for i in self.array:
+            x.append(i[new_point])
+
+        return np.asarray(x)
